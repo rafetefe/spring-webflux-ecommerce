@@ -1,0 +1,15 @@
+springdoc:
+  swagger-ui.path: /openapi/swagger-ui.html
+  api-docs.path: /openapi/v3/api-docs
+  packagesToScan: rafetefe.ecommerce
+  pathsToMatch: /**
+
+api:
+  common:
+    version: 1.0.0
+    title: ecommerce-functions-docs
+    description: 📚
+
+    contact:
+      name: rafetefe
+      url: https://github.com/rafetefe/

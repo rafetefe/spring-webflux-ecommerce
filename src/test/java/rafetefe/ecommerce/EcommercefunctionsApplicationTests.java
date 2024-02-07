@@ -7,7 +7,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 class EcommercefunctionsApplicationTests {
 
 	@Test
-	void contextLoads() {
+	void context(){
+		System.out.println("contextTest sout.");
 	}
 
 }
