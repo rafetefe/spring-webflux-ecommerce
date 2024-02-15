@@ -1,20 +1,25 @@
 package rafetefe.ecommerce.controller;
 
 import org.springframework.web.bind.annotation.*;
+import rafetefe.ecommerce.domain.Product;
 
-@RequestMapping("/cart")
+import java.util.List;
+
 public interface CartController {
 
-    @PostMapping("/remove/{id}")
-    void removeFromCart(@PathVariable int productID);
+    @DeleteMapping("/cart/{productId}")
+    void removeFromCart(@PathVariable int productId);
 
     //wrap around for accidental requests?
-    @PostMapping("/clear")
+    @DeleteMapping("/cart")
     void clearCart();
 
-    @PostMapping("/submit")
+    @PostMapping("/cart")
     void submitCart();
 
-    @PostMapping("/add/{productId}")
+    @PostMapping("/cart/{productId}")
     void addToCart(@PathVariable int productId);
+
+    @GetMapping("/cart")
+    List<Product> getCartContent();
 }

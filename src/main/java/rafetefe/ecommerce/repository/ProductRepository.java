@@ -1,29 +1,15 @@
 package rafetefe.ecommerce.repository;
 
+import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.PagingAndSortingRepository;
 import org.springframework.stereotype.Repository;
 import rafetefe.ecommerce.domain.Product;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Optional;
+
 @Repository
-public class ProductRepository {
+public interface ProductRepository extends PagingAndSortingRepository<Product, String>, CrudRepository<Product, String> {
+    Optional<Product> findByProductId(int productId);
 
-    //Mock DB
-    private List<Product> productList;
-
-    ProductRepository(){
-        this.productList = new ArrayList<Product>();
-    }
-
-    public Product getById(int id){
-        return this.productList.get(id);
-    }
-
-    public void insertProduct(Product product){
-        this.productList.add(product);
-    }
-
-    public List<Product> getAll(){
-        return this.productList;
-    }
+    void deleteByProductId(int productId);
 }

@@ -8,6 +8,6 @@ import org.springframework.stereotype.Service;
 public class UserSessionService {
 
     //Mock User Session Id
-    public final Integer userId = 20240602;
+    public final Integer userId = 2024;
 
 }

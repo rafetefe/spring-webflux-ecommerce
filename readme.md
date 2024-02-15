@@ -1,10 +1,8 @@
 
-	Further experience needed on practices:
+Development continuation of previous branch:
 
-	. Use cases of other components: lazy, prototype, sessional and per-request scope.
+Implemented spring data repos, persistence using mongodb.
+Implemented tests (%100 coverage) using junit and webtestclient, springboottest and testcontainers.
 
-	. Design principles about:
-		Interface controllers that map to services (like in this project)
- 		or real @Controllers that inject @Services.
+Resources:
 
-	. Needs better tests
