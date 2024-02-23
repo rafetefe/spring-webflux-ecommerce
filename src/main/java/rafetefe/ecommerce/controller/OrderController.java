@@ -5,22 +5,25 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import rafetefe.ecommerce.domain.Order;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
 import java.util.List;
 @RequestMapping("/order")
 public interface OrderController {
 
     @GetMapping("/ongoing")
-    List<Order> getOngoingOrders();
+    Flux<Order> getOngoingOrders();
 
     @GetMapping("/complete")
-    List<Order> getCompleteOrders();
+    Flux<Order> getCompleteOrders();
 
     @GetMapping("/cancelled")
-    List<Order> getCancelledOrders();
+    Flux<Order> getCancelledOrders();
 
     @PostMapping("/cancel/{orderId}")
-    void cancelOrder(@PathVariable int orderId);
+    Mono<Void> cancelOrder(@PathVariable int orderId);
 
     @PostMapping("/complete/{orderId}")
-    void completeOrder(@PathVariable int orderId);
+    Mono<Void> completeOrder(@PathVariable int orderId);
 }

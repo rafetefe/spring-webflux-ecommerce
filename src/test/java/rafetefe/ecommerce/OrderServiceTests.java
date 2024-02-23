@@ -2,10 +2,12 @@ package rafetefe.ecommerce;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.internal.matchers.Or;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import rafetefe.ecommerce.domain.Cart;
 import rafetefe.ecommerce.domain.Order;
 import rafetefe.ecommerce.domain.Product;
 import rafetefe.ecommerce.repository.CartRepository;
@@ -14,6 +16,9 @@ import rafetefe.ecommerce.repository.ProductRepository;
 import rafetefe.ecommerce.service.CartService;
 import rafetefe.ecommerce.service.OrderService;
 import rafetefe.ecommerce.service.UserSessionService;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.util.List;
 
@@ -47,72 +52,87 @@ public class OrderServiceTests extends MongoDbTestContainer{
 
     @BeforeEach
     void setup(){
-        orderRepository.deleteAll();
-        productRepository.deleteAll();
-        cartRepository.deleteAll();
+        orderRepository.deleteAll().block();
+        productRepository.deleteAll().block();
+        cartRepository.deleteAll().block();
     }
 
-    private void createOrder(){
+    private Mono<Void> createOrder(){
         int ownerId = userSessionService.userId;
         int sampleProductId = 1;
         Product sample = new Product(sampleProductId, "productName"+sampleProductId, (double) sampleProductId);
-        productRepository.save(sample);
-        cartService.addToCart(sampleProductId);
-        cartService.submitCart();
+        Mono<Product> productMono = productRepository.save(sample);
+
+        return productMono.map(product -> {
+            return cartService.addToCart(sampleProductId); //get and save to cart
+        }).flatMap(e->e)
+                .map(cart -> {
+                    return cartService.submitCart();  //submit the cart
+                }).flatMap(e->e).then();
     }
 
     @Test
-    void getOngoing(){
-        assertTrue(orderService.getOngoingOrders().size() == 0);
-        createOrder();
-        assertTrue(orderService.getOngoingOrders().size() == 1);
+    void getOngoing(){                      //expectComplete().verify() == verifyComplete()
+        StepVerifier.create(orderService.getOngoingOrders()).expectNextCount(0).verifyComplete();
+        createOrder().block();
+        StepVerifier.create(orderService.getOngoingOrders()).expectNextCount(1).verifyComplete();
     }
 
     @Test
     void getCancelled(){
         int userId = userSessionService.userId;
-        //verifies both the cancellation process and the obtaining of cancelled orders
-        assertTrue(orderService.getCancelledOrders().size() == 0);
-        createOrder();
-        Order freshOrder = orderRepository.findAllByOwnerId(userId).get(0);
-        orderService.cancelOrder(freshOrder.getOrderId());
-        assertTrue(orderService.getCancelledOrders().size() == 1);
+
+        //verify no order returns for empty repo
+        StepVerifier.create(orderService.getCancelledOrders()).expectNextCount(0).verifyComplete();
+
+        createOrder().block();
+
+        //Verify upper call has created an order.
+        StepVerifier.create(orderRepository.findAllByOwnerId(userId))
+                .expectNextCount(1).verifyComplete();
+
+        //test the service' getCancelled function.
+        StepVerifier.create(orderService.getCancelledOrders())
+                .expectNextCount(0).verifyComplete();
+
+        //Cancel a order.
+        orderRepository.findAllByOwnerId(userId).next().map(
+                order -> {return orderService.cancelOrder(order.getOrderId());}
+        ).flatMap(e->e).block();
+
+        StepVerifier.create(orderService.getCancelledOrders())
+                .expectNextCount(1).verifyComplete();
     }
 
     @Test
     void getComplete(){
         int userId = userSessionService.userId;
         //verifies both the completion process and the obtaining of completed orders
-        assertTrue(orderService.getCompleteOrders().isEmpty());
-        createOrder();
-        Order freshOrder = orderRepository.findAllByOwnerId(userId).get(0);
-        orderService.completeOrder(freshOrder.getOrderId());
-        assertTrue(orderService.getCompleteOrders().size() == 1);
+        StepVerifier.create(orderService.getCompleteOrders())
+                .expectNextCount(0).verifyComplete();
+
+        createOrder().block();
+
+        StepVerifier.create(orderRepository.findAllByOwnerId(userId))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        //set created order as complete
+        orderRepository.findAllByOwnerId(userId).next()
+                .map(order -> {
+                    return orderService.completeOrder(order.getOrderId());
+                }).flatMap(e->e).then().block();
+
+        StepVerifier.create(orderService.getCompleteOrders())
+                .expectNextCount(1).verifyComplete();
     }
 
-    //redoing of upper tests through api calls
-    /*
-    @GetMapping("/ongoing")
-    List<Order> getOngoingOrders();
-
-    @GetMapping("/complete")
-    List<Order> getCompleteOrders();
-
-    @GetMapping("/cancelled")
-    List<Order> getCancelledOrders();
-
-    @PostMapping("/cancel/{orderId}")
-    void cancelOrder(@PathVariable int orderId);
-
-    @PostMapping("/complete/{orderId}")
-    void completeOrder(@PathVariable int orderId);
-    */
     @Test
     void apiGetOngoing(){
         List<Order> ongoingOrders = getListViaApiAndVerify("/order/ongoing");
         assertTrue(ongoingOrders.isEmpty());//verify returned list is empty
 
-        createOrder();
+        createOrder().block();
 
         ongoingOrders = getListViaApiAndVerify("/order/ongoing");
         assertTrue(ongoingOrders.size() == 1);
@@ -125,15 +145,13 @@ public class OrderServiceTests extends MongoDbTestContainer{
         List<Order> cancelledOrders = getListViaApiAndVerify("/order/cancelled");
         assertTrue(cancelledOrders.isEmpty());
 
-        createOrder();
+        createOrder().block();
 
-        Order freshOrder = orderRepository.findAllByOwnerId(userId).get(0);
+        Order freshOrder = orderRepository.findAllByOwnerId(userId).next().block();
 
         //cancel order
-        assertTrue(webClient.post().uri("/order/cancel/"+freshOrder.getOrderId())
-                .exchange()
-                .returnResult(WebTestClient.ResponseSpec.class)
-                .getStatus().is2xxSuccessful());
+        webClient.post().uri("/order/cancel/"+freshOrder.getOrderId())
+                .exchange().expectStatus().is2xxSuccessful();
 
         //verify increment of cancelled order list.
         cancelledOrders = getListViaApiAndVerify("/order/cancelled");
@@ -147,17 +165,15 @@ public class OrderServiceTests extends MongoDbTestContainer{
         List<Order> completedOrders = getListViaApiAndVerify("/order/complete");
         assertTrue(completedOrders.isEmpty());
 
-        createOrder();
+        createOrder().block();
 
-        Order freshOrder = orderRepository.findAllByOwnerId(userId).get(0);
+        Order freshOrder = orderRepository.findAllByOwnerId(userId).next().block();
 
-        assertTrue(webClient.post().uri("/order/complete/"+freshOrder.getOrderId())
-                .exchange().returnResult(WebTestClient.ResponseSpec.class)
-                .getStatus().is2xxSuccessful());
+        webClient.post().uri("/order/complete/"+freshOrder.getOrderId())
+                .exchange().expectStatus().is2xxSuccessful();
 
         completedOrders = getListViaApiAndVerify("/order/complete");
         assertTrue(completedOrders.size() == 1);
-
     }
 
     private List<Order> getListViaApiAndVerify(String uri){
@@ -166,6 +182,5 @@ public class OrderServiceTests extends MongoDbTestContainer{
         assertTrue(response.getStatus().is2xxSuccessful());
         return response.getResponseBody();
     }
-
 
 }

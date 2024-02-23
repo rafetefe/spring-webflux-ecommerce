@@ -5,6 +5,7 @@ import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+
 import java.util.Date;
 import java.util.List;
 @Document(collection="orders")
@@ -16,7 +17,6 @@ public class Order {
     @Version
     private Integer version;
     /**/
-
     @Indexed(unique = true)
     private int orderId;
     //No user service yet. CompoundIndex postponed.

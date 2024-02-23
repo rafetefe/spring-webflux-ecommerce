@@ -14,9 +14,14 @@ import rafetefe.ecommerce.domain.Product;
 import rafetefe.ecommerce.repository.CartRepository;
 import rafetefe.ecommerce.repository.OrderRepository;
 import rafetefe.ecommerce.repository.ProductRepository;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
+
+import static java.util.logging.Level.FINE;
 
 @RestController
 public class CartService implements CartController {
@@ -51,99 +56,87 @@ public class CartService implements CartController {
         this.productRepository = productRepository;
     }
 
-    private void initUserCart(){
+    private Mono<Cart> initUserCart(){
         int ownerId = userService.userId;
         Cart cart = new Cart(ownerId);
-        cartRepository.save(cart);
+        return cartRepository.save(cart);
     }
 
     @Override
-    public void removeFromCart(int productId) {
+    public Mono<Cart> removeFromCart(int productId) {
         int ownerId = userService.userId;
-        cartRepository.findByOwnerId(ownerId).ifPresent(
-                cart -> {
-                    cart.removeByProductId(productId);
-                    cartRepository.save(cart);
-                }
-        );
+        return cartRepository.findByOwnerId(ownerId)
+                .switchIfEmpty(Mono.error(new Exception("Cart failed to  found:"+productId)))
+                .log(LOG.getName(),FINE)
+                .map(foundCart -> {
+                    foundCart.removeByProductId(productId);
+                    return cartRepository.save(foundCart);
+                    }).flatMap(e->e);
     }
 
     @Override
-    public void clearCart() {
+    public Mono<Cart> clearCart() {
         int ownerId = userService.userId;
-        cartRepository.findByOwnerId(ownerId).ifPresentOrElse(
-                (cartExists) -> {
-                    cartExists.clearContentList();
-                    cartRepository.save(cartExists);
-                },
-                () -> {//case where cart doesn't exist (else state)
-                    this.initUserCart();
-                }
-        );
-    }
+        return cartRepository.findByOwnerId(ownerId)
+                .switchIfEmpty(this.initUserCart())
+                .log(LOG.getName(), FINE)
+                .map(foundCart -> {
+                    foundCart.clearContentList();
+                    return cartRepository.save(foundCart);
+                }).flatMap(e->e);
 
-    //Should be an atomic event.
-    @Override
-    public void submitCart() {
-        int ownerId = userService.userId;
-        cartRepository.findByOwnerId(ownerId).ifPresent(
-                cartExists -> {
-                    if( !(cartExists.getContent().isEmpty()) ){
-                        //if not empty
-                        Order newOrder = new Order(cartExists.getContent(), cartExists.getOwnerId());
-                        orderRepository.save(newOrder);
-                        clearCart();
-                    }
-                }
-        );
-        //submits only if cart exists and cart not empty
+
     }
 
     @Override
-    public void addToCart(int productId) {
+    public Mono<Order> submitCart() {
         int ownerId = userService.userId;
-        Product foundProduct;
-        Cart foundCart;
 
-        if(productRepository.findByProductId(productId).isPresent()){
-            foundProduct = productRepository.findByProductId(productId).get();
-        }else{
-            return;
-            //don't continue if given product doesn't exists
-        }
+        return cartRepository.findByOwnerId(ownerId)
+                .onErrorMap(ex-> new Exception("submitCart error:"+ex.getMessage()))
+                .filter(cart -> !cart.getContent().isEmpty() )
+                .map(foundCart -> {
+                    Order newOrder = new Order(foundCart.getContent(), foundCart.getOwnerId());
+                    foundCart.clearContentList();
+                    return Mono.zip(cartRepository.save(foundCart),orderRepository.save(newOrder))
+                            .map(objects -> objects.getT2());
+                }).flatMap(e->e);
 
-        if(cartRepository.findByOwnerId(ownerId).isPresent()){
-            foundCart = cartRepository.findByOwnerId(ownerId).get();
-        }else{//no Cart found, try to create.
-            this.initUserCart();
-            if(cartRepository.findByOwnerId(ownerId).isPresent()){
-                foundCart = cartRepository.findByOwnerId(ownerId).get();
-            }else{//still no cart found, infrastructure error.
-                return;
-            }
-        }
-
-        foundCart.addProduct(foundProduct);
-        cartRepository.save(foundCart);
     }
 
     @Override
-    public List<Product> getCartContent() {
+    public Mono<Cart> addToCart(int productId) {
         int ownerId = userService.userId;
-        Cart foundCart;
 
-        //same code snippet as above
-        if(cartRepository.findByOwnerId(ownerId).isPresent()){
-            foundCart = cartRepository.findByOwnerId(ownerId).get();
-        }else{//no Cart found, try to create.
-            this.initUserCart();
-            if(cartRepository.findByOwnerId(ownerId).isPresent()){
-                foundCart = cartRepository.findByOwnerId(ownerId).get();
-            }else{//still no cart found, infrastructure error.
-                return null;
-            }
-        }
+        Mono<Product> foundProduct = productRepository.findByProductId(productId)
+                .switchIfEmpty(Mono.error(new Exception("productRepo, requested product not found.")))
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex->new Exception("productRepo, product query returned error:"+ ex.getMessage()));
 
-        return foundCart.getContent();
+        Mono<Cart> foundCart = cartRepository.findByOwnerId(ownerId)
+                .switchIfEmpty(this.initUserCart())
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex->new Exception("cartRepo, cart query returned error:"+ ex.getMessage()));
+
+        return foundProduct.map(p->
+                foundCart.map(
+                        cart -> {
+                            cart.addProduct(p);
+                            return cartRepository.save(cart);
+                        }).flatMap(e->e)
+        ).flatMap(e->e);
+
+
+    }
+
+    @Override
+    public Flux<Product> getCartContent() {
+        int ownerId = userService.userId;
+        return cartRepository.findByOwnerId(ownerId)
+                .switchIfEmpty(this.initUserCart())
+                .log(LOG.getName(), FINE)
+                .flatMapMany(cart -> {
+                    return Flux.fromIterable(cart.getContent());
+                });
     }
 }

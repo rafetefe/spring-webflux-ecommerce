@@ -1,25 +1,28 @@
 package rafetefe.ecommerce.controller;
 
 import org.springframework.web.bind.annotation.*;
+import rafetefe.ecommerce.domain.Cart;
+import rafetefe.ecommerce.domain.Order;
 import rafetefe.ecommerce.domain.Product;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 
 public interface CartController {
 
     @DeleteMapping("/cart/{productId}")
-    void removeFromCart(@PathVariable int productId);
+    Mono<Cart> removeFromCart(@PathVariable int productId);
 
-    //wrap around for accidental requests?
     @DeleteMapping("/cart")
-    void clearCart();
+    Mono<Cart> clearCart();
 
     @PostMapping("/cart")
-    void submitCart();
+    Mono<Order> submitCart();
 
     @PostMapping("/cart/{productId}")
-    void addToCart(@PathVariable int productId);
+    Mono<Cart> addToCart(@PathVariable int productId);
 
     @GetMapping("/cart")
-    List<Product> getCartContent();
+    Flux<Product> getCartContent();
 }

@@ -1,5 +1,6 @@
 package rafetefe.ecommerce.service;
 
+import com.mongodb.DuplicateKeyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,9 +10,13 @@ import org.springframework.web.bind.annotation.RestController;
 import rafetefe.ecommerce.controller.ProductController;
 import rafetefe.ecommerce.domain.Product;
 import rafetefe.ecommerce.repository.ProductRepository;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.stream.StreamSupport;
+
+import static java.util.logging.Level.FINE;
 
 @RestController
 public class ProductService implements ProductController {
@@ -26,51 +31,43 @@ public class ProductService implements ProductController {
     }
 
     @Override
-    public Product createProduct(Product body) {
-        try{
-            productRepository.save(body);
-            LOG.info("Product" + body + "saved successfully");
-            return body;
-        }catch(Exception e){
-            throw new RuntimeException("Error while trying to create:" + e + "\n Provided Body:" + body);
-        }
+    public Mono<Product> createProduct(Product body) {
+        return productRepository.save(body)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(
+                        DuplicateKeyException.class,
+                        ex->new Exception("Product with same ID already exists."+body.getProductId())
+                );//drop creation if product already exists.
     }
 
     @Override
-    public Product getProduct(int productId) {
-        Product product = productRepository.findByProductId(productId)
-                .orElseThrow(  () -> new RuntimeException("Product:"+productId+" not found."));
-        LOG.info("LOG:req findByProductId Successful:"+productId);
-        return product;
+    public Mono<Product> getProduct(int productId) {
+        return productRepository.findByProductId(productId)
+                .switchIfEmpty(Mono.error(new Exception("getProduct: no product found with given id"+productId)))
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex -> new Exception("Error on getProduct"+ex.getMessage()));
     }
 
     @Override
-    public List<Product> getAll() {
-        return StreamSupport.stream(productRepository.findAll().spliterator(), true).toList();
+    public Flux<Product> getAll() {
+        return productRepository.findAll()
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex -> new Exception("Error on getAll:"+ex.getMessage()));
     }
 
     @Override
-    public ResponseEntity deleteProduct(int productId) {
+    public Mono<Void> deleteProduct(int productId) {
+
+        return productRepository.deleteByProductId(productId)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex -> new Exception("LOG Error on deleteByProductId:"+ex.getMessage()));
+
         //idempotent function
-        //
-        LOG.info("Deletion request received for:"+productId);
-        boolean success = false;
-
-        success = productRepository.findByProductId(productId).isPresent();
-
-        if(success){
-            productRepository.deleteByProductId(productId);
-            LOG.info("Deletion for"+productId+"completed.");
-            return new ResponseEntity<>(HttpStatus.ACCEPTED);
-        }else{
-            LOG.info("Deletion for"+productId+":no entry found");
-            return new ResponseEntity(HttpStatus.NOT_FOUND);
-        }
     }
 
     @Override
-    public String webClientTest(){
-        return "hello";
+    public Mono<String> webClientTest(){
+        return Mono.just("hello");
     }
 
 }

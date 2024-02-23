@@ -3,6 +3,8 @@ package rafetefe.ecommerce.controller;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rafetefe.ecommerce.domain.Product;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 
@@ -10,18 +12,18 @@ import java.util.List;
 public interface ProductController {
 
     @PostMapping(value = "/product", produces = "application/json", consumes = "application/json")
-    Product createProduct(@RequestBody Product body);
+    Mono<Product> createProduct(@RequestBody Product body);
 
     @GetMapping(value = "/product/{productId}", produces = "application/json")
-    Product getProduct(@PathVariable int productId);
+    Mono<Product> getProduct(@PathVariable int productId);
 
     @GetMapping("/products")
-    List<Product> getAll();
+    Flux<Product> getAll();
 
     @DeleteMapping(value = "/product/{productId}")
-    ResponseEntity deleteProduct(@PathVariable int productId);
+    Mono<Void> deleteProduct(@PathVariable int productId);
 
     //function for testing Webclient
     @GetMapping("/webClientTest")
-    String webClientTest();
+    Mono<String> webClientTest();
 }

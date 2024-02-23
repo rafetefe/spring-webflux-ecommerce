@@ -1,18 +1,22 @@
 package rafetefe.ecommerce.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
 import rafetefe.ecommerce.controller.OrderController;
 import rafetefe.ecommerce.domain.Order;
 import rafetefe.ecommerce.domain.Status;
 import rafetefe.ecommerce.repository.OrderRepository;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
-import java.util.List;
-import java.util.stream.StreamSupport;
+import static java.util.logging.Level.FINE;
 
 @RestController
 public class OrderService implements OrderController {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ProductService.class);
     private final OrderRepository orderRepository;
     private final UserSessionService userSessionService;
 
@@ -23,69 +27,61 @@ public class OrderService implements OrderController {
     }
 
     @Override
-    public List<Order> getOngoingOrders() {
+    public Flux<Order> getOngoingOrders() {
         int ownerId = userSessionService.userId;
-        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.ONGOING);
+        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.ONGOING)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex-> new Exception("getOngoingOrders error:"+ex.getMessage()));
     }
 
     @Override
-    public List<Order> getCompleteOrders() {
+    public Flux<Order> getCompleteOrders() {
         int ownerId = userSessionService.userId;
-        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.COMPLETE);
+        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.COMPLETE)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex-> new Exception("getCompleteOrders error:"+ex.getMessage()));
     }
 
     @Override
-    public List<Order> getCancelledOrders() {
+    public Flux<Order> getCancelledOrders() {
         int ownerId = userSessionService.userId;
-        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.CANCELLED);
+        return this.orderRepository.findAllByOwnerIdAndStatus(ownerId, Status.CANCELLED)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex-> new Exception("getCancelledOrders error:"+ex.getMessage()));
     }
 
+
     @Override
-    public void cancelOrder(int orderId) {
+    public Mono<Void> cancelOrder(int orderId) {
         int ownerId = userSessionService.userId;
-        orderRepository.findByOrderId(orderId).ifPresent(
-                foundOrder -> {
+
+        return orderRepository.findByOrderId(orderId)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex -> new Exception("cancelOrder error:"+ ex.getMessage()))
+                .map(foundOrder ->  {
                     foundOrder.cancelOrder();
-                    orderRepository.save(foundOrder);
-                }
-        );
+                    return orderRepository.save(foundOrder);
+                }).flatMap(e->e).then();
+
     }
 
     @Override
-    public void completeOrder(int orderId) {
+    public Mono<Void> completeOrder(int orderId) {
         int ownerId = userSessionService.userId;
-        orderRepository.findByOrderId(orderId).ifPresent(
-                foundOrder -> {
+
+        return orderRepository.findByOrderId(orderId)
+                .switchIfEmpty(Mono.error(new Exception
+                        ("completeOrder error: findByOrderId returned nothing for given orderId, "+orderId)
+                ))
+                .log(LOG.getName(), FINE)
+                .onErrorMap(ex -> new Exception("completeOrder error:"+ex.getMessage()))
+                .map(foundOrder -> {
                     foundOrder.completeOrder();
-                    orderRepository.save(foundOrder);
-                }
-        );
+                    return orderRepository.save(foundOrder);
+                }).flatMap(e->e).then();
+
     }
 
-
-    //Aborted| So to leave the filtering of status to database / spring data.
-    //performance measure can clarify: which one is better.
-
-//    private List<Order> filterParalelStream(Iterable<Order> iter, Status status){
-//        return StreamSupport.stream(iter.spliterator(), true)
-//                .filter(i->i.getStatus().equals(status))
-//                .toList();
-//    }
-//
-//    @Override
-//    public List<Order> getOngoingOrders() {
-//        return filterParalelStream(orderRepository.findAll(), Status.ONGOING);
-//    }
-//
-//    @Override
-//    public List<Order> getCompleteOrders() {
-//        return filterParalelStream(orderRepository.findAll(), Status.COMPLETE);
-//    }
-//
-//    @Override
-//    public List<Order> getCancelledOrders() {
-//        return filterParalelStream(orderRepository.findAll(), Status.CANCELED);
-//    }
 
 
 }

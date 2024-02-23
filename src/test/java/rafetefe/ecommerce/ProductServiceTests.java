@@ -1,5 +1,6 @@
 package rafetefe.ecommerce;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -10,11 +11,18 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import rafetefe.ecommerce.domain.Product;
 import rafetefe.ecommerce.repository.ProductRepository;
 import rafetefe.ecommerce.service.ProductService;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
+import reactor.test.StepVerifierOptions;
 
 import java.util.List;
 
 import static org.junit.Assert.assertTrue;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+
+/*
+* TODO: TESTLERİ reactive yap.
+* */
 
 @SpringBootTest(webEnvironment = RANDOM_PORT)
 public class ProductServiceTests extends MongoDbTestContainer{
@@ -25,66 +33,59 @@ public class ProductServiceTests extends MongoDbTestContainer{
     @Autowired
     WebTestClient webClient;
 
+    @BeforeEach
+    void setup(){
+        //Clear testContainer
+        //productRepository.deleteAll();
+        productRepository.deleteAll().block();
+    }
+
     @Test
     void insertionByRepo(){
-        /*
-        / Confirms:
-            repo.Save
-            repo.findByProductId
-            product.equals
-         */
-
-        //Clear testContainer
-        productRepository.deleteAll();
-
         Product sample = new Product(37, "ExampleProduct", 11.2);
 
-        productRepository.save(sample);
+        productRepository.save(sample).block();
 
-        Product queriedProduct = productRepository.findByProductId(37).get();
-
-        assertTrue(queriedProduct.equals(sample));
+        //from: reactor-test
+        StepVerifier.create(productRepository.findByProductId(37))
+                .expectNextMatches(queryResult -> queryResult.contentWiseEqual(sample))
+                .verifyComplete();
     }
 
     @Test
     void serviceDirectAccessTest(){
-        productRepository.deleteAll();
         int sampleId=10;
         Product sample = new Product(sampleId,"name",5.0);
-        productService.createProduct(sample);
-        assertTrue(productRepository.findByProductId(sampleId).isPresent());
-        assertTrue(productService.getProduct(sampleId).equals(sample));
+        productService.createProduct(sample).block();
+
+//        assertTrue(productService.getProduct(sampleId).block().equals(sample));
+        StepVerifier.create(productService.getProduct(sampleId))
+                .expectNext(sample)
+                .verifyComplete();
 
         int sampleId2=3;
         Product sample2 = new Product(sampleId2, "name", 3.0);
-        productService.createProduct(sample2);
+        productService.createProduct(sample2).block();
 
-        List<Product> list = productService.getAll();
-        assertTrue(list.size() == 2);
-        assertTrue(list.get(0).equals(sample));
-        assertTrue(list.get(1).equals(sample2));
+        StepVerifier.create(productService.getAll())
+                .expectNext(sample, sample2)
+                .verifyComplete();
 
-        productService.deleteProduct(sampleId);
-        assertTrue(productRepository.findByProductId(sampleId).isEmpty());
+        productService.deleteProduct(sampleId).block();
 
-        productService.deleteProduct(sampleId2);
-        list = productService.getAll();
+        StepVerifier.create(productRepository.findByProductId(sampleId))
+                .verifyComplete();
 
-        assertTrue(list.size() == 0);
+        productService.deleteProduct(sampleId2).block();
+
+        //List is empty error
+        StepVerifier.create(productService.getAll()).expectError();
+
     }
 
     @Test
     void insertionByApi(){
-
-        /*
-         * Confirms:
-         * POST on /product successfully parses
-         *
-         * This was unsuccessful for reason of Product class not having
-         * get and set id methods. lessons learned.
-         * */
-
-        productRepository.deleteAll();
+        productRepository.deleteAll().block();
 
         Product sample = new Product(12, "exampleProduct", 6.4);
 
@@ -92,34 +93,31 @@ public class ProductServiceTests extends MongoDbTestContainer{
                 .bodyValue(sample)
                 .exchange();
 
-        Product queriedProduct = productRepository.findByProductId(12).get();
-
-        assertTrue(queriedProduct.contentWiseEqual(sample));
-
+        StepVerifier.create(productRepository.findByProductId(12))
+                .assertNext(product -> product.contentWiseEqual(sample)).verifyComplete();
     }
 
     @Test
     void getByApi(){
         //add using webclient and get http.Ok
-        assertTrue(deleteAllInsertAndVerify(12));
+        deleteAllInsertAndVerify(12);
 
         //check the repo for record existence
-        assertTrue(productRepository.findByProductId(12).isPresent());
+        StepVerifier.create(productRepository.findByProductId(12)).expectNextCount(1).verifyComplete();
 
         //obtain the record using api
         Product got = webClient.get().uri("/product/"+12).
                 exchange().expectBody(Product.class).returnResult().getResponseBody();
 
         //obtain the record from repo
-        Product query = productRepository.findByProductId(12).get();
+        Mono<Product> query = productRepository.findByProductId(12);
 
-        //assert their equality
-        assertTrue(got.equals(query));
+        StepVerifier.create(query).expectNext(got).verifyComplete();
     }
 
     @Test
     void getAllByApi(){
-        productRepository.deleteAll();;
+        productRepository.deleteAll().block();
 
         EntityExchangeResult<List<Product>> res = webClient.get()
                 .uri("/products")
@@ -152,29 +150,25 @@ public class ProductServiceTests extends MongoDbTestContainer{
     void deletionByApi(){
         int sampleId = 13;
         assertTrue(deleteAllInsertAndVerify(sampleId));
-        assertTrue(productRepository.findByProductId(sampleId).isPresent());
 
-        assertTrue(
-                webClient.delete().uri("/product/"+sampleId)
-                        .exchange()
-                        .returnResult(ResponseEntity.class)
-                        .getStatus().equals(HttpStatus.ACCEPTED)
-        );
+        StepVerifier.create(productRepository.findByProductId(sampleId))
+                .expectNextCount(1).verifyComplete(); //expect 1 item
 
-        assertTrue(productRepository.findByProductId(sampleId).isEmpty());
+        //delete product
+        webClient.delete().uri("/product/"+sampleId).exchange()
+                        .expectStatus().isOk();
 
-        //verify HTTPStatus NotFound
-        assertTrue(
-                webClient.delete().uri("/product/"+sampleId)
-                        .exchange()
-                        .returnResult(ResponseEntity.class)
-                        .getStatus().equals(HttpStatus.NOT_FOUND)
-        );
+        //assert delation of product.
+        StepVerifier.create(productRepository.findByProductId(sampleId))
+                .expectNextCount(0).verifyComplete();
 
+
+        webClient.delete().uri("/product/"+sampleId).exchange()
+                .expectStatus().isOk();
     }
 
     private boolean deleteAllInsertAndVerify(int productId){
-        productRepository.deleteAll();
+        productRepository.deleteAll().block();
 
         Product sample = new Product(productId, "exampleProduct", 6.4);
 

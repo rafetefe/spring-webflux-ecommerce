@@ -13,6 +13,8 @@ import rafetefe.ecommerce.repository.OrderRepository;
 import rafetefe.ecommerce.repository.ProductRepository;
 import rafetefe.ecommerce.service.CartService;
 import rafetefe.ecommerce.service.UserSessionService;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.util.List;
 import java.util.stream.StreamSupport;
@@ -39,129 +41,127 @@ public class CartServiceTests extends MongoDbTestContainer{
 
     @BeforeEach
     void setUP(){
-        cartRepository.deleteAll();
-        orderRepository.deleteAll();
-        productRepository.deleteAll();
+        StepVerifier.create(cartRepository.deleteAll()).verifyComplete();
+        StepVerifier.create(orderRepository.deleteAll()).verifyComplete();
+        StepVerifier.create(productRepository.deleteAll()).verifyComplete();
     }
 
     @Test
     void directAccessAdd(){
-        //assure user cart is empty
-        assertTrue(cartService.getCartContent().size() == 0);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(0).verifyComplete();
 
         //create new product in system
         int dummyId = 6;
-        assertTrue(createProductAndVerify(dummyId));
+        createProductAndVerify(dummyId);
 
-        cartService.addToCart(dummyId);
+        //subject of test
+        cartService.addToCart(dummyId).block();
 
-        //verify product is added and the cart grew by 1.
-        Product p = productRepository.findByProductId(dummyId).get();
-        assertTrue(cartService.getCartContent().contains(p));
-        assertTrue(cartService.getCartContent().size() == 1);
+        //recive added item for comperison purpose
+        Product readProduct = productRepository.findByProductId(dummyId).block();
+
+        StepVerifier.create(cartService.getCartContent())
+                .expectNext(readProduct)
+                .verifyComplete();
     }
 
     @Test
     void directAccessCreateAndClear(){
-
         int dummyId = 7;
-        assertTrue(createProductAndVerify(dummyId));
+        //creation of example product
+        createProductAndVerify(dummyId);
 
         //creates or clears cart.
-        cartService.clearCart();
-        assertTrue(cartService.getCartContent().size() == 0);
+        //clear cart returns an empty cart object
+        StepVerifier.create(cartService.clearCart()).expectNextCount(1).verifyComplete();
+
+
+        StepVerifier.create(cartService.getCartContent()).expectNextCount(0).verifyComplete();
 
         //add product and verify
-        cartService.addToCart(dummyId);
-        assertTrue(cartService.getCartContent().size() == 1);
-        assertTrue(cartService.getCartContent().get(0).equals(productRepository.findByProductId(dummyId).get()));
+        StepVerifier.create(cartService.addToCart(dummyId)).expectNextCount(1).verifyComplete();
 
-        //verify clearCart clears a non-empty cart.
-        //this test caused me to notice an algorithm-flaw/bug.
-        cartService.clearCart();
-        assertTrue(cartService.getCartContent().size() == 0);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNext(productRepository.findByProductId(dummyId).block())
+                .verifyComplete();
+
+        StepVerifier.create(cartService.clearCart()).expectNextCount(1).verifyComplete();
+
+        StepVerifier.create(cartService.getCartContent()).expectNextCount(0).verifyComplete();
     }
 
     @Test
     void directAccessRemove(){
-
         int dummyId = 36; //new product just for the sake of better coverage
-        assertTrue(createProductAndVerify(dummyId));
+        createProductAndVerify(dummyId);
 
-        cartService.addToCart(dummyId);
-        assertTrue(cartService.getCartContent().get(0).equals(productRepository.findByProductId(dummyId).get()));
-        assertTrue(cartService.getCartContent().size() == 1);
+        //update and get the new cart
+        StepVerifier.create(cartService.addToCart(dummyId)).expectNextCount(1).verifyComplete();
 
-        //verify deletion works
-        cartService.removeFromCart(dummyId);
-        assertTrue(cartService.getCartContent().size() == 0);
+        //get cart content and assure it's made by only the this item.
+        StepVerifier.create(cartService.getCartContent())
+                .expectNext(productRepository.findByProductId(dummyId).block())
+                .verifyComplete();
+
+        //verify deletion works (will return updated cart)
+        StepVerifier.create(cartService.removeFromCart(dummyId))
+                .expectNextCount(1).verifyComplete();
+
+        //expect it to be empty
+        StepVerifier.create(cartService.getCartContent()).expectNextCount(0).verifyComplete();
     }
 
     @Test
     void directAccessSubmit(){
         int ownerId = userSessionService.userId;
 
-        //assure order table is clear.
-        assertTrue(orderRepository.findAllByOwnerId(ownerId).size() == 0);
+        //post-@BeforeEach, assure order repo is empty.
+        StepVerifier.create(orderRepository.findAllByOwnerId(ownerId))
+                .expectNextCount(0).verifyComplete();
 
         //cart table is empty no order should be created.
-        cartService.submitCart();
-        assertTrue(orderRepository.findAllByOwnerId(ownerId).size() == 0);
+        cartService.submitCart().block();
+        //assure receiving empty list
+        StepVerifier.create(orderRepository.findAllByOwnerId(ownerId))
+                .expectNextCount(0).verifyComplete();
 
         //and empty cart is created, but order still shouldn't be created
-        cartService.clearCart();
-        cartService.submitCart();
-        assertTrue(orderRepository.findAllByOwnerId(ownerId).size() == 0);
+        cartService.clearCart().block();
+        cartService.submitCart().block();
+        StepVerifier.create(orderRepository.findAllByOwnerId(ownerId))
+                .expectNextCount(0).verifyComplete();
 
         int sampleProductId = 1;
         createProductAndVerify(sampleProductId);
-        cartService.addToCart(sampleProductId);
-        cartService.submitCart();
+        cartService.addToCart(sampleProductId).block();
+
+        //expect order post submission
+        StepVerifier.create(cartService.submitCart())
+                .expectNextCount(1).verifyComplete();
 
         //assure that only 1 order is created
-        assertTrue(orderRepository.findAllByOwnerId(ownerId).size() == 1);
+        StepVerifier.create(orderRepository.findAllByOwnerId(ownerId))
+                .expectNextCount(1).verifyComplete();
 
         //confirm that current cart is cleared after submission
-        assertTrue(cartService.getCartContent().size()==0);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(0).verifyComplete();
     }
 
-        /*
-            TestList:
-
-            @DeleteMapping("/cart/{productId}")
-            void removeFromCart(@PathVariable int productId);
-
-            @DeleteMapping("/cart")
-            void clearCart();
-
-            @PostMapping("/cart")
-            void submitCart();
-
-            @PostMapping("/cart/{productId}")
-            void addToCart(@PathVariable int productId);
-
-            @GetMapping("/cart")
-            List<Product> getCartContent();
-     */
-
-    //Calling the functions through apis. Extensive business logics
-    //already is tested at above.
     @Test
     void apiAddProduct() {
         int ownerId = userSessionService.userId;
-        int sampleProductId = 5;
-        createProductAndVerify(sampleProductId);
+        int dummyId = 5;
+        createProductAndVerify(dummyId);
+        //verify existence of product in repo.
 
         //add the product to cart
-        assertTrue(
-                webClient.post().uri("/cart/" + sampleProductId).exchange()
-                        .returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
+        webClient.post().uri("/cart/" + dummyId).exchange()
+                        .expectStatus().isOk();
 
-        assertTrue(cartService.getCartContent().contains(
-                productRepository.findByProductId(sampleProductId).get()
-        ));
+        StepVerifier.create(cartService.getCartContent()).expectNextCount(1)
+                .verifyComplete();
     }
 
     @Test
@@ -180,12 +180,10 @@ public class CartServiceTests extends MongoDbTestContainer{
         //parse the response into a list
         List<Product> cartContent = result.getResponseBody();
 
-        //assert that list contains the added product from above in the first api call.
-        Product sampleProduct = productRepository.findByProductId(sampleProductId).get();
-
-        //equals fails ??
-        assertTrue(cartContent.get(0).contentWiseEqual(sampleProduct));
-        assertTrue(cartContent.size() == 1);
+        StepVerifier.create(productRepository.findByProductId(sampleProductId))
+                        .assertNext(product ->
+                                product.contentWiseEqual(cartContent.get(0)))
+                .verifyComplete();
     }
 
     @Test
@@ -197,80 +195,70 @@ public class CartServiceTests extends MongoDbTestContainer{
         apiAddProduct();
         int sampleProductId = 5;
 
-        assertTrue(cartService.getCartContent().size() == 1);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(1).verifyComplete();
 
-        assertTrue(
-                webClient.delete().uri("/cart/" + sampleProductId).exchange()
-                        .returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
+        webClient.delete().uri("/cart/" + sampleProductId).exchange()
+                    .expectStatus().is2xxSuccessful();
 
-        assertTrue(cartService.getCartContent().size() == 0);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(0).verifyComplete();
     }
 
     @Test
     void apiClearCart(){
         apiAddProduct();
 
-        assertTrue(cartService.getCartContent().size() == 1);
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(1).verifyComplete();
 
-        assertTrue(
-                webClient.delete().uri("/cart").exchange().returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
+        webClient.delete().uri("/cart").exchange()
+                .expectStatus().is2xxSuccessful();
 
-        assertTrue(cartService.getCartContent().size() == 0);
-
+        StepVerifier.create(cartService.getCartContent())
+                .expectNextCount(0).verifyComplete();
     }
 
     @Test
     void apiSubmitCart(){
 
-        //No Cart
-        assertTrue(
-                webClient.post().uri("/cart").exchange()
-                        .returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
+        //State-of-no-Cart
+
+        //attempt for submit 1
+        webClient.post().uri("/cart").exchange()
+                .expectStatus().isOk();
+
 
         //Assure no order is registered, when cart is not existent
-        assertTrue(
-                StreamSupport.stream(orderRepository.findAll().spliterator(), false)
-                        .toList().isEmpty()
-        );
+        StepVerifier.create(orderRepository.findAll())
+                .expectNextCount(0).verifyComplete();
 
         //Create Cart, empty cart shouldn't be submitted.
         apiClearCart();
 
-        assertTrue(
-                webClient.post().uri("/cart").exchange()
-                        .returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
+        //attemp for submit 2
+        webClient.post().uri("/cart").exchange().expectStatus().is2xxSuccessful();
+
         //Assure no order is registered, when cart is empty
-        assertTrue(
-                StreamSupport.stream(orderRepository.findAll().spliterator(), false)
-                        .toList().isEmpty()
-        );
+        StepVerifier.create(orderRepository.findAll())
+                .expectNextCount(0).verifyComplete();
+
 
         apiAddProduct();
-        assertTrue(
-                webClient.post().uri("/cart").exchange()
-                        .returnResult(WebTestClient.ResponseSpec.class)
-                        .getStatus().is2xxSuccessful()
-        );
-        assertTrue(
-                StreamSupport.stream(orderRepository.findAll().spliterator(), false)
-                        .toList().size() == 1
-        );
+        webClient.post().uri("/cart").exchange()
+                .expectStatus().is2xxSuccessful();
+        StepVerifier.create(orderRepository.findAll())
+                .expectNextCount(1).verifyComplete();
+
     }
 
 
 
-    public boolean createProductAndVerify(int dummyId){
-        productRepository.deleteAll();
+    public void createProductAndVerify(int dummyId){
+        productRepository.deleteAll().block();
         Product sample = new Product(dummyId, "productName"+dummyId, (double) dummyId);
-        productRepository.save(sample);
-        return productRepository.findByProductId(dummyId).isPresent();
+        productRepository.save(sample).block();
+        StepVerifier.create(productRepository.findByProductId(dummyId))
+                .expectNext(sample).verifyComplete();
     }
 }
